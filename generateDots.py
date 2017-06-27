@@ -6,15 +6,15 @@ Created on Sat Jun 17 06:52:06 2017
 """
 import random
 import time
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import shapely.geometry as shp
 import math
 import cartopy.feature as cfeature
-import cartopy.io
 from cartopy.io import shapereader
 
-thisRepo = '/home/mattdzugan/Documents/dev/dibbble debut/'
+thisRepo = '/home/mattdzugan/Documents/dev/dribbble debut/'
 land_50m = cfeature.NaturalEarthFeature('physical', 'land', '50m',
                                         edgecolor='face',
                                         facecolor=cfeature.COLORS['land'])
@@ -101,12 +101,16 @@ def poissonDisc(points,R1,k):
 ###############################################################################
 ###############################################################################
 
+## Definitions
+pRad = 95.0 #radius of specs (in kilometers) (Use 95 for actual basketball scale)
+nGon = 16    #the order polygon meant to approximate a circle
+
 ## Generate List of Points
 points = []
 firstPoint = {'lat':(-90+180.0*random.random()), 'lon':(-180+360.0*random.random()), 'active':True}
 points.append(firstPoint)
 start = time.time()
-points = poissonDisc(points,300,30) #use 95 to approximate # dots on basketball
+points = poissonDisc(points,pRad,30) 
 end = time.time()
 print(str(len(points))+" points in "+str(round(end-start))+" seconds")
 
@@ -118,14 +122,9 @@ for point in points:
        point['lon'] -= 360.0 
 
 ## Determine if they're Land or Water
-
 shpfilename = shapereader.natural_earth(resolution='110m',
                                         category='physical',
                                         name='land')
-#shpfilename = shapereader.natural_earth(resolution='110m',
-#                                        category='cultural',
-#                                        name='admin_0_countries')
-
 reader = shapereader.Reader(shpfilename)
 countries = reader.records()
 for country in countries:
@@ -133,12 +132,52 @@ for country in countries:
         if country.geometry.contains(shp.Point(points[ii]['lon'],points[ii]['lat'])):
             points[ii]['land'] = True
 
+## For each point build a little circle
+for ii in range(len(points)):
+    pLat = points[ii]['lat']
+    pLon = points[ii]['lon']
+    vLats = []
+    vLons = []
+    #vP = []
+    gJ = []
+    for nn in range(nGon+1):
+        brng = (360.0/nGon)*nn
+        newLL = reckon(pLon,pLat,brng,pRad/2.0)
+        vLat = newLL[1]
+        vLon = newLL[0]
+        vLon = vLon%360.0
+        if vLon>180.0:
+           vLon -= 360.0 
+        vLon = round(vLon,2)
+        vLat = round(vLat,2)
+        vLons.append(vLon)
+        vLats.append(vLat)
+        #vP.append({'x':vLon, 'y':vLat})
+        gJ.append([vLon, vLat])
+    points[ii]['poly'] = [gJ]
+    if points[ii]['land']:
+        plt.plot(vLons, vLats,'g')
+    else:
+        plt.plot(vLons, vLats,'b')
+plt.show()    
+
+
 landList=np.array(list(o['land'] for o in points))
 lonList=np.array(list(o['lon'] for o in points))
 latList=np.array(list(o['lat'] for o in points))
 plt.scatter(lonList, latList, s=100, c=landList)
 plt.show()
 
-## Turn them into polygons
+## Build geojson
+landGeoJson =  {"type":"Feature", "geometry":{"type":"MultiPolygon", "coordinates":[]}}
+waterGeoJson = {"type":"Feature", "geometry":{"type":"MultiPolygon", "coordinates":[]}}
+for point in points:
+    if point['land']:
+        landGeoJson['geometry']['coordinates'].append(point['poly'])
+    else:
+        waterGeoJson['geometry']['coordinates'].append(point['poly'])
 
-## Build JSON and export
+featureCollection = {"type":"FeatureCollection", "features":[landGeoJson,waterGeoJson]}
+## and export
+with open(thisRepo+"data/dotPolys_"+str(int(pRad))+".geo.json", 'wb') as outfile:
+        json.dump(featureCollection, outfile)
